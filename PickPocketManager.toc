@@ -1,0 +1,6 @@
+## Interface: 11302
+## Title: PickPocketManager
+## Author: Rincey
+## Version: 1.0.0
+## SavedVariablesPerCharacter: TotalMoneyLootedTillNowInCopper, highestOneTimeLooted, lowestOneTimeLooted
+main.lua
