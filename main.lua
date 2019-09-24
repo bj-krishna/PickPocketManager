@@ -1,3 +1,9 @@
+--[[
+TODO:
+	Junkboxes money 
+	Junkboxes count
+	
+]]--
 local debug = true
 
 --To know whether Pick pickpocket spell has been casted
@@ -8,12 +14,14 @@ local ppSuccess = false
 local ppCasted = false
 local playerInCombat = false
 
+--local bagIndex, slotIndex
+local junkBoxMode = false
+
 --Money Storage Variables in copper
 local currentSessionMoneyLooted = 0
 
 --Slash Commands
 local function SayHelloAndShowOptions(msg)
-	print('SLASH_PPM1: DEBUGTRACE: Msg: ' .. msg)
 	if(msg == "") then
 		print('Welcome to PickPocketManager, Here are options to use: ')
 		print('Toggle PPM: /ppm on/off')
@@ -46,8 +54,21 @@ local function SayHelloAndShowOptions(msg)
 	end
 end
 
+local function ToggleJunkMode(msg)
+	if(junkBoxMode == true) then
+		junkBoxMode = false
+		print('JunkBoxMode Off')
+	else
+		junkBoxMode = true
+		print('JunkBoxMode On')
+	end
+end
+
 SLASH_PPM1 = "/ppm"
 SlashCmdList["PPM"] = SayHelloAndShowOptions
+
+SLASH_PPMJB1 = "/ppmjb"
+SlashCmdList["PPMJB"] = ToggleJunkMode
 
 local AddonLoaded_EventFrame = CreateFrame("Frame")
 AddonLoaded_EventFrame:RegisterEvent("ADDON_LOADED")
@@ -74,12 +95,9 @@ local PPSpellSuccess_EventFrame = CreateFrame("Frame")
 PPSpellSuccess_EventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 PPSpellSuccess_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
-		local arg1, arg2, arg3 = ...
-		--print('UNIT_SPELLCAST_SUCCEEDED::DEBUGTRACE: Arg1: ' .. arg1)
-		--print('UNIT_SPELLCAST_SUCCEEDED::DEBUGTRACE: Arg2: ' .. arg2)
-		--print('UNIT_SPELLCAST_SUCCEEDED::DEBUGTRACE: Arg3: ' .. arg3)			
+		local arg1, arg2, arg3 = ...				
 		if(arg3 == 921) then
-			print('Pick Pocket spell casted successfully...') 
+			PP_Print('Pick Pocket spell casted successfully...') 
 			ppSuccess = true
 			ppCasted = true
 		end
@@ -90,7 +108,7 @@ PlayerInCombat_EventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 PlayerInCombat_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
 		--No arguments for this event
-		print('PLAYER_REGEN_DISABLED::DEBUGTRACE: Reset PP flag')
+		PP_Print('PLAYER_REGEN_DISABLED::DEBUGTRACE: Reset PP flag')
 		ppSuccess = false
 		playerInCombat = true
 	end)
@@ -100,7 +118,7 @@ PlayerOutOfCombat_EventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 PlayerOutOfCombat_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
 		--No arguments for this event
-		print('PLAYER_REGEN_ENABLED::DEBUGTRACE: Out of combat')		
+		PP_Print('PLAYER_REGEN_ENABLED::DEBUGTRACE: Out of combat')		
 		playerInCombat = false
 	end)
 	
@@ -108,11 +126,15 @@ local LootOpened_EventFrame = CreateFrame("Frame")
 LootOpened_EventFrame:RegisterEvent("LOOT_OPENED")
 LootOpened_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
+		print('LOOT_OPENED')
 		if(ppSuccess == true) then
 			local lootIcon, lootName = GetLootSlotInfo(1)			
-			UpdateLootMoney(lootName, event)			
+			UpdateLootMoney(lootName, event)						
 			ppSuccess = false 	--Next Loot can be normal loot, so reset this again to make sure only PP loot comes here
-			ppCasted = false	--If Loot Opened event triggered, no need of CHAT_MSG_MONEY event.
+			ppCasted = false	--If Loot Opened event triggered, no need of CHAT_MSG_MONEY event.		
+		elseif(junkBoxMode == true) then
+			local lootIcon, lootName = GetLootSlotInfo(1)
+			UpdateLootMoney(lootName, event)
 		end
 	end)
 	
@@ -124,15 +146,31 @@ local LootChatMsg_EventFrame = CreateFrame("Frame")
 LootChatMsg_EventFrame:RegisterEvent("CHAT_MSG_MONEY")
 LootChatMsg_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
-		local arg1 = ...
-		print('CHAT_MSG_MONEY::DEBUGTRACE: Arg1: ' .. arg1)	
+		local arg1 = ...		
 		if(ppCasted == true and playerInCombat == true) then			
 			--Get the money looted from the chat message
 			local lootName = TrimForMoneyMessage(arg1)
 			UpdateLootMoney(lootName, event)					
 			ppCasted = false -- Reset the flag for next pickpocketing
-		end
+		end		
 	end)
+	
+--[[local testKB_EventFrame = CreateFrame("Frame")
+testKB_EventFrame:RegisterEvent("ITEM_UNLOCKED")
+testKB_EventFrame:SetScript("OnEvent",
+	function(self, event, ...)
+		local arg1, arg2 = ...		
+		print('ITEM_UNLOCKED::DEBUGTRACE: ' .. arg1)
+		print('ITEM_UNLOCKED::DEBUGTRACE: ' .. arg2)
+		
+		local texture, itemCount, locked, quality, readable, lootable, ilink = GetContainerItemInfo(arg1, arg2)
+		print(texture) print(itemCount) print(locked) print(quality) print(readable) print(lootable) print(ilink)
+		if(otherLootOpened == true) then
+			bagIndex = arg1
+			slotIndex = arg2
+			print('battered1') print('battered2')
+		end
+	end) ]]--
 
 -- Functions --
 	
@@ -174,6 +212,11 @@ end
 
 --This Argument must be in GSC string format (Eg: 1 Gold 2 Silver 25 Copper)
 function UpdateLootMoney(money, event)
+	if(string.find(money, "Gold") == nil and string.find(money, "Silver") == nil and string.find(money, "Copper") == nil) then
+		PP_Print('Not Money')
+		return
+	end
+	
 	local g, s, c = ExtractGSCFromMoney(money)
 	local ppCopperAmount = ConvertToCopper(g, s, c)
 	
@@ -189,8 +232,11 @@ function UpdateLootMoney(money, event)
 		lowestOneTimeLooted = ppCopperAmount
 	end
 		
-	currentSessionMoneyLooted = currentSessionMoneyLooted + ppCopperAmount				
+	currentSessionMoneyLooted = currentSessionMoneyLooted + ppCopperAmount
 	TotalMoneyLootedTillNowInCopper = TotalMoneyLootedTillNowInCopper + ppCopperAmount
+	
+	PP_PrintMoney(currentSessionMoneyLooted, "Current Session", event)
+	PP_PrintMoney(TotalMoneyLootedTillNowInCopper, "Total", event)
 end
 
 function ConvertToCopper(g, s, c)
@@ -221,5 +267,12 @@ end
 function PP_Print(message)
 	if(debug == true) then
 		print(message)
+	end
+end
+
+function PP_PrintMoney(moneyInCopper, info, event)
+	if(debug == true) then
+		local tG, tS, tC = ConvertToGSC(moneyInCopper)
+		print(event .. '::DEBUGTRACE: ' .. info .. ' Money looted: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
 	end
 end
