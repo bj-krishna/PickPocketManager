@@ -1,12 +1,18 @@
 --[[
+##Code wise Preference of loot : Pickpocket > JunkBoxMode > Junkbox without Mode
 TODO:
-	Junkboxes money 
-	Junkboxes count
 	
+Issues::
+		There is a bug when accounting junkbox money when junkBoxMode is off
+		If autoloot is off, user opens junkbox and takes time to loot all items, the money is not accounted.
+		Even if autoloot is on, while looting if user gets Inventory full and loot window stays open, money is not accounted.
+		**Money is accounted for junkboxes now only if loot window closes as fast as possible**
+		Until I find a new way to account this money, I dont think there is a way with current code.
 ]]--
-local debug = true
+local debug = false
 
 --To know whether Pick pickpocket spell has been casted
+local ppLootName = ""
 local ppSuccess = false
 
 --Only used for a Specific use case - For Event CHAT_MSG_MONEY
@@ -14,8 +20,14 @@ local ppSuccess = false
 local ppCasted = false
 local playerInCombat = false
 
---local bagIndex, slotIndex
 local junkBoxMode = false
+local junkBoxModeLootName = ""
+
+--Accounting junkbox money even if junkBoxMode is Off
+local OtherMoneyLootName = ""
+local junkBoxItemClicked = false --This becomes true only if money is in loot_opened event and junkbox is clicked after that loot_opened.
+--This click can be either moving/just clicking and leaving/actually opening the box.
+--CHAT_MSG_MONEY event takes care of whether it is opened for that msg.
 
 --Money Storage Variables in copper
 local currentSessionMoneyLooted = 0
@@ -23,34 +35,26 @@ local currentSessionMoneyLooted = 0
 --Slash Commands
 local function SayHelloAndShowOptions(msg)
 	if(msg == "") then
-		print('Welcome to PickPocketManager, Here are options to use: ')
-		print('Toggle PPM: /ppm on/off')
-		print('Current Session - Money looted: /ppm S')
-		print('Total Money looted: /ppm T')
-		print('Highest loot: /ppm H')
-		print('Lowest loot: /ppm L')
+		print('Welcome to PickPocketManager, Here are options to use: ')		
+		print('PickPocketMoney for current session: /ppm S')
+		print('PickPocketMoney total: /ppm T')
+		print('PickPocketMoney maximum loot: /ppm H')
+		print('PickPocketMoney minimum loot: /ppm L')
 		print('Show All Stats: /ppm all')
-	elseif(msg == "S") then
-		local tG, tS, tC = ConvertToGSC(currentSessionMoneyLooted)
-		print('Current Session Money looted: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
-	elseif(msg == "T") then
-		local tG, tS, tC = ConvertToGSC(TotalMoneyLootedTillNowInCopper)
-		print('Total Money looted: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
-	elseif(msg == "H") then
-		local tG, tS, tC = ConvertToGSC(highestOneTimeLooted)
-		print('Max loot: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
-	elseif(msg == "L") then
-		local tG, tS, tC = ConvertToGSC(lowestOneTimeLooted)
-		print('Min loot: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
-	elseif(msg == "all") then
-		local tG, tS, tC = ConvertToGSC(currentSessionMoneyLooted)
-		print('Current Session Money looted: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
-		local tG, tS, tC = ConvertToGSC(TotalMoneyLootedTillNowInCopper)
-		print('Total Money looted: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
-		local tG, tS, tC = ConvertToGSC(highestOneTimeLooted)
-		print('Max loot: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
-		local tG, tS, tC = ConvertToGSC(lowestOneTimeLooted)
-		print('Min loot: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
+		print('Toggle JunkBoxMode: /ppmjb')
+	elseif(msg == "S" or msg == "s") then		
+		print('PickPocketMoney::Session:: ' .. GetCoinTextureString(currentSessionMoneyLooted))
+	elseif(msg == "T" or msg == "t") then
+		print('PickPocketMoney::Total:: ' .. GetCoinTextureString(TotalMoneyLootedTillNowInCopper))
+	elseif(msg == "H" or msg == "h") then		
+		print('PickPocketMoney::MaxLoot:: ' .. GetCoinTextureString(highestOneTimeLooted))
+	elseif(msg == "L" or msg == "l") then		
+		print('PickPocketMoney::MinLoot:: ' .. GetCoinTextureString(lowestOneTimeLooted))
+	elseif(msg == "all" or msg == "ALL") then		
+		print('PickPocketMoney::Session:: ' .. GetCoinTextureString(currentSessionMoneyLooted))
+		print('PickPocketMoney::Total:: ' .. GetCoinTextureString(TotalMoneyLootedTillNowInCopper))
+		print('PickPocketMoney::MaxLoot:: ' .. GetCoinTextureString(highestOneTimeLooted))
+		print('PickPocketMoney::MinLoot:: ' .. GetCoinTextureString(lowestOneTimeLooted))
 	end
 end
 
@@ -108,7 +112,7 @@ PlayerInCombat_EventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 PlayerInCombat_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
 		--No arguments for this event
-		PP_Print('PLAYER_REGEN_DISABLED::DEBUGTRACE: Reset PP flag')
+		PP_Print('PLAYER_REGEN_DISABLED::DEBUGTRACE: Reset PP Flag')
 		ppSuccess = false
 		playerInCombat = true
 	end)
@@ -125,52 +129,79 @@ PlayerOutOfCombat_EventFrame:SetScript("OnEvent",
 local LootOpened_EventFrame = CreateFrame("Frame")
 LootOpened_EventFrame:RegisterEvent("LOOT_OPENED")
 LootOpened_EventFrame:SetScript("OnEvent",
-	function(self, event, ...)
-		print('LOOT_OPENED')
+	function(self, event, ...)		
 		if(ppSuccess == true) then
 			local lootIcon, lootName = GetLootSlotInfo(1)			
-			UpdateLootMoney(lootName, event)						
+			--UpdateLootMoney(lootName, event)			
+			ppLootName = lootName			
+			PP_Print('ppLootName: ' .. ppLootName)
 			ppSuccess = false 	--Next Loot can be normal loot, so reset this again to make sure only PP loot comes here
 			ppCasted = false	--If Loot Opened event triggered, no need of CHAT_MSG_MONEY event.		
 		elseif(junkBoxMode == true) then
 			local lootIcon, lootName = GetLootSlotInfo(1)
-			UpdateLootMoney(lootName, event)
+			--UpdateLootMoney(lootName, event)		
+			junkBoxModeLootName = lootName
+			PP_Print('junkBoxModeLootName: ' .. junkBoxModeLootName)
+		else
+			local lootIcon, lootName, lootQuantity = GetLootSlotInfo(1)
+			--PP_Print('lootIcon: ' .. lootIcon)
+			--If money store, this might be money inside junk box.
+			if(lootQuantity == 0 and (string.find(lootName, "Gold") ~= nil or string.find(lootName, "Silver") ~= nil or string.find(lootName, "Copper") ~= nil)) then
+				OtherMoneyLootName = lootName				
+				PP_Print('OtherMoneyLootName: ' .. OtherMoneyLootName)
+			end
 		end
 	end)
-	
---This is for one specific use case.
---Player pickpockets and immediately attacks 
---(LOOT_OPENED event does not get triggered here for some reason and after around 1 sec, 
---	Player receives the pickpocket loot and chat msg is displayed.)	
+	 
 local LootChatMsg_EventFrame = CreateFrame("Frame")
 LootChatMsg_EventFrame:RegisterEvent("CHAT_MSG_MONEY")
 LootChatMsg_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
-		local arg1 = ...		
+		local arg1 = ...
+		--Pick pocket money
+		if(ppLootName ~= "") then
+			UpdateLootMoney(ppLootName, event)
+			ppLootName = ""
+			PP_Print('ppLootName Reset')			
+		end
+		--Player pickpockets and immediately attacks
+		--LOOT_OPENED event does not get triggered here for some reason and Player receives the pickpocket loot
 		if(ppCasted == true and playerInCombat == true) then			
 			--Get the money looted from the chat message
 			local lootName = TrimForMoneyMessage(arg1)
-			UpdateLootMoney(lootName, event)					
+			UpdateLootMoney(lootName, event)
 			ppCasted = false -- Reset the flag for next pickpocketing
-		end		
+		end				
+		--Junkbox money
+		if(junkBoxModeLootName ~= "") then
+			UpdateLootMoney(junkBoxModeLootName, event)
+			junkBoxModeLootName = ""
+			PP_Print('junkBoxModeLootName Reset')
+		elseif(junkBoxItemClicked == true) then			
+			UpdateLootMoney(OtherMoneyLootName, event)
+			
+			--Reset flags
+			junkBoxItemClicked = false
+			OtherMoneyLootName = ""
+			PP_Print('junkBoxItemClicked Reset, OtherMoneyLootName Reset')
+		elseif(OtherMoneyLootName ~= "") then
+			OtherMoneyLootName = ""
+			PP_Print('OtherMoneyLootName Reset')
+		end
 	end)
 	
---[[local testKB_EventFrame = CreateFrame("Frame")
-testKB_EventFrame:RegisterEvent("ITEM_UNLOCKED")
-testKB_EventFrame:SetScript("OnEvent",
+local ItemUnlocked_EventFrame = CreateFrame("Frame")
+ItemUnlocked_EventFrame:RegisterEvent("ITEM_UNLOCKED")
+ItemUnlocked_EventFrame:SetScript("OnEvent",
 	function(self, event, ...)
 		local arg1, arg2 = ...		
-		print('ITEM_UNLOCKED::DEBUGTRACE: ' .. arg1)
-		print('ITEM_UNLOCKED::DEBUGTRACE: ' .. arg2)
-		
-		local texture, itemCount, locked, quality, readable, lootable, ilink = GetContainerItemInfo(arg1, arg2)
-		print(texture) print(itemCount) print(locked) print(quality) print(readable) print(lootable) print(ilink)
-		if(otherLootOpened == true) then
-			bagIndex = arg1
-			slotIndex = arg2
-			print('battered1') print('battered2')
+		local texture, itemCount, locked, quality, readable, lootable, itemHyperLink = GetContainerItemInfo(arg1, arg2)
+		PP_Print('ITEM_UNLOCKED: ' .. itemHyperLink)
+		if(OtherMoneyLootName ~= "" and string.find(itemHyperLink, "Junkbox") ~= nil) then			
+			PP_Print('Junkbox item clicked after looting money')
+			junkBoxItemClicked = true
 		end
-	end) ]]--
+	end)
 
 -- Functions --
 	
@@ -182,8 +213,7 @@ end
 
 function ExtractGSCFromMoney(moneyLooted)
 	--String = 1 Gold 2 Silver 3 Copper (each number can be 1 digit or 2 digits)
-	--String = 10 Gold 2 Silver 30 Copper
-	--print('ExtractGSCFromMoney::DEBUGTRACE:FunctionCall')
+	--String = 10 Gold 2 Silver 30 Copper	
 	local goldAmount = 0
 	local silverAmount = 0
 	local copperAmount = 0
@@ -211,7 +241,7 @@ function ExtractGSCFromMoney(moneyLooted)
 end
 
 --This Argument must be in GSC string format (Eg: 1 Gold 2 Silver 25 Copper)
-function UpdateLootMoney(money, event)
+function UpdateLootMoney(money)
 	if(string.find(money, "Gold") == nil and string.find(money, "Silver") == nil and string.find(money, "Copper") == nil) then
 		PP_Print('Not Money')
 		return
@@ -235,8 +265,8 @@ function UpdateLootMoney(money, event)
 	currentSessionMoneyLooted = currentSessionMoneyLooted + ppCopperAmount
 	TotalMoneyLootedTillNowInCopper = TotalMoneyLootedTillNowInCopper + ppCopperAmount
 	
-	PP_PrintMoney(currentSessionMoneyLooted, "Current Session", event)
-	PP_PrintMoney(TotalMoneyLootedTillNowInCopper, "Total", event)
+	DEFAULT_CHAT_FRAME:AddMessage('PickPocketMoney::Session:: ' .. GetCoinTextureString(currentSessionMoneyLooted))
+	DEFAULT_CHAT_FRAME:AddMessage('PickPocketMoney::Total:: ' .. GetCoinTextureString(TotalMoneyLootedTillNowInCopper))
 end
 
 function ConvertToCopper(g, s, c)
@@ -244,6 +274,7 @@ function ConvertToCopper(g, s, c)
 	return totalCopperAmount
 end
 
+--Not used now since we are using GetCoinTextureString API which does everything and extra
 function ConvertToGSC(totalCopperAmount)
 	local gold = 0
 	local silver = 0
@@ -267,12 +298,5 @@ end
 function PP_Print(message)
 	if(debug == true) then
 		print(message)
-	end
-end
-
-function PP_PrintMoney(moneyInCopper, info, event)
-	if(debug == true) then
-		local tG, tS, tC = ConvertToGSC(moneyInCopper)
-		print(event .. '::DEBUGTRACE: ' .. info .. ' Money looted: ' .. tG .. ' Gold ' .. tS .. ' Silver ' .. tC .. ' Copper')
 	end
 end
