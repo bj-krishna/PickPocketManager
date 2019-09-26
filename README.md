@@ -2,7 +2,7 @@
 World of Warcraft Addon to track Rogue's Pickpocketing.
 
 ## Steps to Install
-Download from https://github.com/bj-krishna/PickPocketManager/releases/tag/1.0.0
+Download from https://github.com/bj-krishna/PickPocketManager/releases/tag/1.0.0/
 Extract the zip file
 Copy the PickPocketManager to WoW Addons folder
 
